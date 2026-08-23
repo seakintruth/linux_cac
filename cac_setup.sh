@@ -318,7 +318,9 @@ check_for_firefox ()
             print_info "Done."
 
             ff_exists=true
-            db_location="$(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox" | grep -v "Trash")"
+            # Guard the pipeline: with `set -o pipefail`, grep exits 1 when no
+            # profile db exists yet, which would abort the script under set -e.
+            db_location="$(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox" | grep -v "Trash" || true)"
             ff_profile_dir="$(dirname "$db_location")"
             print_info "Found Firefox with profile in ${ff_profile_dir}"
 

@@ -27,3 +27,16 @@ jobs:
 
       - name: Run ShellCheck with -x flag
         run: shellcheck -x cac_setup.sh
+
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install fakeroot (used by root_check tests)
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+      - name: Run test suite
+        run: bash tests/run_tests.sh -v
