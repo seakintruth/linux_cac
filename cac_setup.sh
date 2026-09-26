@@ -5,28 +5,27 @@
 
 main ()
 {
-    EXIT_SUCCESS=0                      # Success exit code
-    E_NOTROOT=86                        # Non-root exit error
-    E_BROWSER=87                        # Browser-related error (e.g. no browser installed)
-    E_DATABASE=88                       # No database located
-    E_CERTS=89                          # Certificate download/extract error
-    DWNLD_DIR="/tmp"                    # Location to place artifacts
+    EXIT_SUCCESS=0
+    E_NOTROOT=86
+    E_BROWSER=87
+    E_DATABASE=88
+    E_CERTS=89
+    DWNLD_DIR="/tmp"
 
-    chrome_exists=false                 # Google Chrome is installed
-    ff_exists=false                     # Firefox is installed
-    snap_ff=false                       # Snapped Firefox
-    ff_profile_dir=""                   # Firefox profile directory
+    chrome_exists=false
+    ff_exists=false
+    snap_ff=false
+    ff_profile_dir=""
 
     ORIG_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
     DB_FILENAME="cert9.db"
-    # Public Cyber Exchange PKCS#7 zips (version is inside the archive, not the URL).
-    # Catalog: https://www.cyber.mil/pki-pke/tools-configuration-files
     DL_BASE="https://dl.dod.cyber.mil/wp-content/uploads/pki-pke/zip"
     WORK_DIR="$DWNLD_DIR/linux_cac_certs"
     PEM_DIR="$WORK_DIR/pems"
     UNIQUE_DIR="$WORK_DIR/unique"
 
     root_check
+    select_bundles
     browser_check
     mapfile -t databases < <(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox\|pki" | grep -v "Trash")
     if [ "${#databases[@]}" -eq 0 ]
@@ -41,7 +40,6 @@ main ()
     DEBIAN_FRONTEND=noninteractive apt install -y libpcsclite1 pcscd libccid libpcsc-perl pcsc-tools libnss3-tools unzip wget openssl opensc
     print_info "Done"
 
-    select_bundles
     rm -rf "$WORK_DIR"
     mkdir -p "$PEM_DIR" "$UNIQUE_DIR"
 
@@ -91,7 +89,7 @@ main ()
     fi
 
     exit "$EXIT_SUCCESS"
-} # main
+}
 
 print_err ()
 {
@@ -155,14 +153,16 @@ select_bundles ()
     fi
 
     echo
-    echo "DoD PKI CAs will be installed (required for CAC)."
+    echo "linux_cac: choose CA bundles first."
+    echo "DoD PKI CAs are always installed (required for CAC)."
     echo "Also install other public Cyber Exchange CA bundles?"
-    echo "  [1] No \xe2\x80\x94 DoD only (default)"
+    echo "  [1] No - DoD only (default)"
     echo "  [2] ECA (contractor External Certification Authority)"
     echo "  [3] External partner trust chains (federal / approved PKIs)"
     echo "  [4] WCF B&I"
     echo "  [5] All public CA zips (DoD + ECA + External + WCF)"
     echo "JITC test PKI is not offered."
+    echo "Close Firefox and Chrome if they are open, then answer."
     echo
     printf "Enter 1-5, or a comma list (e.g. 2,3): " > /dev/tty
     IFS= read -r choice < /dev/tty || choice="1"
