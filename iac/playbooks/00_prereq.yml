@@ -1,0 +1,13 @@
+---
+- name: Install USB helpers on the Proxmox node that holds the reader
+  hosts: proxmox
+  become: true
+  tasks:
+    - name: Copy attach/detach helpers
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/{{ item.src }}"
+        dest: "/usr/local/sbin/{{ item.dest }}"
+        mode: "0755"
+      loop:
+        - { src: usb_attach.sh, dest: linux-cac-usb-attach }
+        - { src: usb_detach.sh, dest: linux-cac-usb-detach }

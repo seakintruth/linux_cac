@@ -1,8 +1,4 @@
-<h1 align="center">Linux CAC</h1>
-
-<p align='center'>
-  <a href="https://github.com/sponsors/jdjaxon"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-30363D?style=flat&logo=GitHub-Sponsors&logoColor=#white" /></a>
-</p>
+# Linux CAC
 
 A project for consistently configuring Debian-based Linux distributions to work with Common Access Cards (CACs).
 
@@ -24,6 +20,16 @@ The script prompts first for extra public bundles (ECA, external partners, WCF, 
 Non-interactive: `sudo CAC_BUNDLES=all bash cac_setup.sh`
 
 Requires wget, unzip, and openssl (installed by the script).
+
+## Supported configurations
+
+Only combinations that passed a lab run. Dates, screenshots, USB notes, and planned rows live in [COMPATIBILITY.md](COMPATIBILITY.md).
+
+| Distribution | Version | Browsers |
+| --- | --- | --- |
+| Ubuntu | 26.04 | Snap Firefox, Chrome |
+
+How the lab is run: [iac/README.md](iac/README.md).
 
 ## License
 MIT. See LICENSE.

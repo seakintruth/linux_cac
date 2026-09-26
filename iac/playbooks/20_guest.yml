@@ -1,0 +1,52 @@
+---
+- name: Install desktop bits and browsers on guests
+  hosts: cac_guests
+  become: true
+  tasks:
+    - name: Skip non-Debian until cac_setup.sh has a dnf path
+      ansible.builtin.meta: end_host
+      when: os_family | default('debian') != 'debian'
+
+    - name: Wait for apt lock
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 3; done
+      changed_when: false
+
+    - name: Install middleware-adjacent packages used by tests
+      ansible.builtin.apt:
+        name:
+          - xfce4
+          - xfce4-terminal
+          - lightdm
+          - pcscd
+          - pcsc-tools
+          - libnss3-tools
+          - unzip
+          - wget
+          - openssl
+          - opensc
+          - scrot
+          - xdotool
+        update_cache: true
+        state: present
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+
+    - name: Install Firefox ESR when requested
+      ansible.builtin.apt:
+        name: firefox-esr
+        state: present
+      when: browser == 'firefox-esr'
+
+    - name: Install Snap Firefox when requested
+      ansible.builtin.command: snap install firefox
+      register: snap_ff
+      changed_when: snap_ff.rc == 0
+      failed_when: false
+      when: browser == 'firefox-snap'
+
+    - name: Note Chrome must be a .deb already on the template or installed by hand
+      ansible.builtin.debug:
+        msg: "Google Chrome is not in Ubuntu archives. Bake it into template {{ template_vmid | default('?') }}."
+      when: browser == 'google-chrome'

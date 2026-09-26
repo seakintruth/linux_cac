@@ -1,0 +1,25 @@
+---
+- name: Run cac_setup.sh on guests
+  hosts: cac_guests
+  become: true
+  vars:
+    setup_src: "{{ playbook_dir }}/../../cac_setup.sh"
+  tasks:
+    - name: Copy setup script
+      ansible.builtin.copy:
+        src: "{{ setup_src }}"
+        dest: /usr/local/sbin/cac_setup.sh
+        mode: "0755"
+
+    - name: Run setup non-interactively
+      ansible.builtin.command: bash /usr/local/sbin/cac_setup.sh
+      environment:
+        CAC_BUNDLES: "{{ cac_bundles | default('dod') }}"
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+      register: cac_run
+      changed_when: true
+
+    - name: Show last lines of setup
+      ansible.builtin.debug:
+        msg: "{{ cac_run.stdout_lines[-30:] }}"

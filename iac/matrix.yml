@@ -1,0 +1,62 @@
+---
+# OS × browser matrix. template_vmid is the Proxmox cloud-init template.
+# status: verified | smoke | planned | unsupported
+# unsupported = guest family cac_setup.sh cannot install yet (no dnf path).
+
+combinations:
+  - name: cac-u26-ff
+    os: ubuntu-26.04
+    browser: firefox-snap
+    template_vmid: 9006
+    status: verified
+    notes: Live on Resolute; Snap Firefox CAC already works via pcscd slot.
+
+  - name: cac-u26-chrome
+    os: ubuntu-26.04
+    browser: google-chrome
+    template_vmid: 9006
+    status: verified
+    notes: Same host as above; Chrome uses ~/.pki/nssdb.
+
+  - name: cac-u24-ff
+    os: ubuntu-24.04
+    browser: firefox-snap
+    template_vmid: 9004
+    status: planned
+
+  - name: cac-u24-chrome
+    os: ubuntu-24.04
+    browser: google-chrome
+    template_vmid: 9004
+    status: planned
+
+  - name: cac-u22-ff
+    os: ubuntu-22.04
+    browser: firefox-snap
+    template_vmid: 9002
+    status: planned
+
+  - name: cac-deb12-ffesr
+    os: debian-12
+    browser: firefox-esr
+    template_vmid: 9012
+    status: planned
+
+  - name: cac-deb13-ffesr
+    os: debian-13
+    browser: firefox-esr
+    template_vmid: 9013
+    status: planned
+
+  - name: cac-mint22-ff
+    os: linuxmint-22
+    browser: firefox
+    template_vmid: 9022
+    status: planned
+
+  - name: cac-fedora42-ff
+    os: fedora-42
+    browser: firefox
+    template_vmid: 9042
+    status: unsupported
+    notes: Needs a dnf/rpm path in cac_setup.sh first.

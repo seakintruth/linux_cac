@@ -1,0 +1,33 @@
+---
+- name: Detach USB and optionally stop guests
+  hosts: cac_guests
+  serial: 1
+  gather_facts: false
+  tasks:
+    - name: Detach USB reader
+      ansible.builtin.command: >
+        /usr/local/sbin/linux-cac-usb-detach
+        {{ vm_id }} {{ cac_usb_slot }}
+      delegate_to: "{{ cac_usb_node }}"
+      become: true
+      failed_when: false
+
+- name: Stop VMs
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../matrix.yml
+  tasks:
+    - name: Stop matrix guests
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_token_id }}"
+        api_token_secret: "{{ proxmox_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        node: "{{ proxmox_node }}"
+        name: "{{ item.name }}"
+        state: stopped
+      loop: "{{ combinations }}"
+      when: item.status != 'unsupported'
+      failed_when: false
