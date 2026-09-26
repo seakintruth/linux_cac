@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-
 # cac_setup.sh
 # Description: Setup a Linux environment for Common Access Card use.
+
+set -euo pipefail
 
 main ()
 {
     EXIT_SUCCESS=0
     E_NOTROOT=86
-    E_BROWSER=87
-    E_DATABASE=88
     E_CERTS=89
-    DWNLD_DIR="/tmp"
+    DWNLD_DIR="$(mktemp -d)"
+    trap 'rm -rf "$DWNLD_DIR"' EXIT
 
     chrome_exists=false
     ff_exists=false
@@ -28,11 +28,12 @@ main ()
     select_bundles
     browser_check
     mapfile -t databases < <(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox\|pki" | grep -v "Trash")
+    SKIP_CERT_IMPORT=false
     if [ "${#databases[@]}" -eq 0 ]
     then
-        print_err "No valid databases located. Try running, then closing Firefox, then start this script again."
-        echo -e "\tExiting..."
-        exit "$E_DATABASE"
+        print_warn "No valid databases located. Try running, then closing Firefox, then start this script again."
+        print_warn "Continuing without importing certificates into any browser profile."
+        SKIP_CERT_IMPORT=true
     fi
 
     print_info "Installing middleware and essential utilities..."
@@ -50,13 +51,18 @@ main ()
     done
     dedupe_pems
 
-    for db in "${databases[@]}"
-    do
-        if [ -n "$db" ]
-        then
-            import_certs "$db"
-        fi
-    done
+    if [ "$SKIP_CERT_IMPORT" != true ]
+    then
+        for db in "${databases[@]}"
+        do
+            if [ -n "$db" ]
+            then
+                import_certs "$db"
+            fi
+        done
+    else
+        print_warn "Skipping certificate import (no usable browser database)."
+    fi
 
     print_info "Enabling pcscd service to start on boot..."
     systemctl enable pcscd.socket
@@ -67,8 +73,8 @@ main ()
         print_info "Connecting snapped Firefox to the pcscd socket..."
         if ! snap connect firefox:pcscd
         then
-            print_err "Failed to connect. Try upgrading with 'apt upgrade' and 'snap refresh' first."
-            exit "$E_BROWSER"
+            print_warn "Failed to connect. Try upgrading with 'apt upgrade' and 'snap refresh' first."
+            print_warn "Continuing without the pcscd snap connection."
         fi
         print_info "Registering the pkcs11 module..."
         sudo -H -u "$SUDO_USER" modutil -dbdir "sql:$ff_profile_dir" \
@@ -79,15 +85,7 @@ main ()
         print_info "Done"
     fi
 
-    print_info "Removing artifacts..."
-    rm -rf "$WORK_DIR" 2>/dev/null
-    if [ "$?" -ne "$EXIT_SUCCESS" ]
-    then
-        print_err "Failed to remove artifacts. Artifacts were stored in ${WORK_DIR}."
-    else
-        print_info "Done. A reboot may be required."
-    fi
-
+    print_info "Done. A reboot may be required."
     exit "$EXIT_SUCCESS"
 }
 
@@ -105,12 +103,20 @@ print_info ()
     echo -e "${INFO_COLOR}[INFO]${NO_COLOR} $1"
 }
 
+print_warn ()
+{
+    WARN_COLOR='\033[1;33m'
+    NO_COLOR='\033[0m'
+    echo -e "${WARN_COLOR}[WARN]${NO_COLOR} $1"
+}
+
 root_check ()
 {
     local ROOT_UID=0
     if [ "${EUID:-$(id -u)}" -ne "$ROOT_UID" ]
     then
-        print_err "Please run this script as root."
+        print_err "This script must run as root to install packages and import trusted certificates."
+        print_warn "Re-run with sudo."
         exit "$E_NOTROOT"
     fi
 }
@@ -277,17 +283,42 @@ run_firefox ()
 {
     print_info "Starting Firefox silently to complete post-install actions..."
     sudo -H -u "$SUDO_USER" firefox --headless --first-startup >/dev/null 2>&1 &
+    FF_PID=$!
     sleep 3
-    pkill -9 firefox
+    stop_browser "$FF_PID"
     sleep 1
+}
+
+stop_browser ()
+{
+    local pid=$1
+    local waited=0
+    local GRACE_SECONDS=10
+    if [ -z "${pid:-}" ]; then
+        return 0
+    fi
+    if kill -0 "$pid" 2>/dev/null
+    then
+        kill -TERM "$pid" 2>/dev/null || true
+        while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$GRACE_SECONDS" ]
+        do
+            sleep 1
+            waited=$((waited + 1))
+        done
+        if kill -0 "$pid" 2>/dev/null
+        then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    fi
 }
 
 run_chrome ()
 {
     print_info "Running Chrome to ensure it has completed post-install actions..."
     sudo -H -u "$SUDO_USER" google-chrome --headless --disable-gpu >/dev/null 2>&1 &
+    CHROME_PID=$!
     sleep 3
-    pkill -9 google-chrome
+    stop_browser "$CHROME_PID"
     sleep 1
     print_info "Done."
 }
@@ -299,9 +330,8 @@ browser_check ()
     check_for_chrome
     if [ "$ff_exists" == false ] && [ "$chrome_exists" == false ]
     then
-        print_err "No version of Mozilla Firefox OR Google Chrome has been detected."
-        print_info "Please install either or both to proceed."
-        exit "$E_BROWSER"
+        print_warn "No version of Mozilla Firefox OR Google Chrome has been detected."
+        print_warn "Certificate import will be skipped for browsers. Continuing with middleware install."
     fi
 }
 
