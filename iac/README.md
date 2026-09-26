@@ -3,6 +3,9 @@
 Ansible drives a Proxmox cluster through the OS × browser matrix.
 GitHub Actions only lints `cac_setup.sh`. Real CAC and USB tests run here.
 
+Pass/fail rows, dates, and USB notes: [COMPATIBILITY.md](../COMPATIBILITY.md).
+The root README only lists pairs that already passed.
+
 ## Why not CI runners
 
 A GitHub-hosted runner cannot attach a CAC reader, cannot pop a browser
@@ -83,3 +86,6 @@ ansible-playbook -i inventory/hosts.yml playbooks/60_teardown.yml
 
 `cac_setup.sh` is still Debian/Ubuntu `apt` only. Fedora/RHEL guests are
 in the matrix as `unsupported` until the script grows a `dnf` path.
+
+After a pass, update [COMPATIBILITY.md](../COMPATIBILITY.md). After **verified**,
+also add the pair to the README table.
