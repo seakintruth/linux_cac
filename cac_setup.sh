@@ -27,7 +27,7 @@ main ()
     root_check
     select_bundles
     browser_check
-    mapfile -t databases < <(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox\|pki" | grep -v "Trash")
+    mapfile -t databases < <(list_nss_databases)
     SKIP_CERT_IMPORT=false
     if [ "${#databases[@]}" -eq 0 ]
     then
@@ -76,12 +76,11 @@ main ()
             print_warn "Failed to connect. Try upgrading with 'apt upgrade' and 'snap refresh' first."
             print_warn "Continuing without the pcscd snap connection."
         fi
-        print_info "Registering the pkcs11 module..."
-        sudo -H -u "$SUDO_USER" modutil -dbdir "sql:$ff_profile_dir" \
-            -add "CAC Module" -libfile /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so -force
+        print_info "Snap Firefox CAC uses the pcscd slot, not host opensc-pkcs11.so."
+        register_snap_pkcs11
     else
         print_info "Registering CAC module with PKSC11..."
-        pkcs11-register
+        pkcs11-register || print_warn "pkcs11-register failed."
         print_info "Done"
     fi
 
@@ -230,8 +229,7 @@ fetch_and_extract_bundle ()
     mapfile -t p7s < <(find "$extract_dir" -type f \( -iname '*.p7b' -o -iname '*.p7c' \) | sort)
     if [ "${#p7s[@]}" -eq 0 ]
     then
-        print_err "No PKCS#7 files in $key zip; skipping."
-        return
+        print_info "No PKCS#7 files in $key zip; looking for .cer/.crt/.pem instead."
     fi
 
     print_info "Extracting ${#p7s[@]} PKCS#7 file(s) from $key..."
@@ -250,6 +248,8 @@ fetch_and_extract_bundle ()
         /-----BEGIN CERTIFICATE-----/ { n++; f=sprintf("%s/%s-%03d.pem", out, prefix, n) }
         f { print > f }
     ' "$combined"
+
+    extract_loose_certs "$key" "$extract_dir"
 }
 
 dedupe_pems ()
@@ -277,6 +277,77 @@ dedupe_pems ()
         print_err "No unique certificates to import."
         exit "$E_CERTS"
     fi
+}
+
+list_nss_databases ()
+{
+    local found db
+    mapfile -t found < <(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep -v Trash | sort)
+    for db in "${found[@]}"
+    do
+        case "$db" in
+            */snap/*/[0-9]*/*) continue ;;
+            *) printf '%s\n' "$db" ;;
+        esac
+    done
+    if [ -d "$ORIG_HOME/snap" ]
+    then
+        find "$ORIG_HOME/snap" -name "$DB_FILENAME" 2>/dev/null | grep -E '/snap/[^/]+/[0-9]+/' | awk -F/ '
+            {
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "snap") { app = $(i + 1); rev = $(i + 2) + 0 }
+                }
+                if (rev >= best[app]) { best[app] = rev; path[app] = $0 }
+            }
+            END { for (a in path) print path[a] }
+        '
+    fi
+}
+
+register_snap_pkcs11 ()
+{
+    local listed
+    listed="$(sudo -H -u "$SUDO_USER" modutil -dbdir "sql:$ff_profile_dir" -list 2>/dev/null || true)"
+    if echo "$listed" | grep -qiE 'pkcs11|opensc|CAC Module|OpenSC'
+    then
+        print_info "PKCS#11 is already listed in this profile. Leaving it alone."
+        return 0
+    fi
+    print_info "Not loading host opensc-pkcs11.so into snap Firefox (that call always fails)."
+    print_info "If CAC already works in this browser, you can ignore PKCS#11 registration."
+}
+
+extract_loose_certs ()
+{
+    local key="$1"
+    local extract_dir="$2"
+    local f out i=0
+    mapfile -t loose < <(find "$extract_dir" -type f \( -iname '*.cer' -o -iname '*.crt' -o -iname '*.der' -o -iname '*.pem' \) | sort)
+    if [ "${#loose[@]}" -eq 0 ]
+    then
+        return 0
+    fi
+    print_info "Converting ${#loose[@]} loose certificate file(s) from $key..."
+    for f in "${loose[@]}"
+    do
+        i=$((i + 1))
+        out="$(printf '%s/%s-cer-%03d.pem' "$PEM_DIR" "$key" "$i")"
+        if grep -q "BEGIN CERTIFICATE" "$f" 2>/dev/null
+        then
+            cp "$f" "$out"
+            continue
+        fi
+        if openssl x509 -inform DER -in "$f" -out "$out" 2>/dev/null
+        then
+            continue
+        fi
+        if openssl x509 -inform PEM -in "$f" -out "$out" 2>/dev/null
+        then
+            continue
+        fi
+        print_info "Skipping unreadable cert: $f"
+        rm -f "$out"
+    done
 }
 
 run_firefox ()
@@ -343,7 +414,7 @@ check_for_firefox ()
             run_firefox
             print_info "Done."
             ff_exists=true
-            db_location="$(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox" | grep -v "Trash")"
+            db_location="$(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox" | grep -v "Trash" | head -n 1 || true)"
             ff_profile_dir="$(dirname "$db_location")"
             print_info "Found Firefox with profile in ${ff_profile_dir}"
             if command -v firefox | grep snap >/dev/null
@@ -364,11 +435,16 @@ check_for_firefox ()
 
 check_for_chrome ()
 {
-    if command -v google-chrome >/dev/null
+    if command -v google-chrome >/dev/null || command -v chromium-browser >/dev/null || command -v chromium >/dev/null
     then
         chrome_exists=true
-        print_info "Found Google Chrome."
-        run_chrome
+        print_info "Found Google Chrome or Chromium."
+        if find "$ORIG_HOME/.pki" "$ORIG_HOME/snap/chromium" -name "$DB_FILENAME" 2>/dev/null | grep -q .
+        then
+            print_info "Chrome/Chromium NSS database already present; skip headless launch."
+        else
+            run_chrome
+        fi
     else
         print_info "Chrome not found."
     fi
@@ -381,13 +457,17 @@ import_certs ()
     if [ -n "$db_root" ]
     then
         case "$db_root" in
-            *"pki"*)
-                print_info "Importing unique certificates for Chrome..."
-                echo
-                ;;
             *"firefox"*)
                 print_info "Importing unique certificates for Firefox..."
-                echo
+                ;;
+            */snap/code/*)
+                print_info "Importing unique certificates for VS Code..."
+                ;;
+            *"chromium"*| *"pki"*)
+                print_info "Importing unique certificates for Chrome/Chromium..."
+                ;;
+            *)
+                print_info "Importing unique certificates into $db_root"
                 ;;
         esac
         print_info "Loading certificates into $db_root "
