@@ -67,15 +67,20 @@ Since Ubuntu 22.04, Firefox will only work if you allow the script to remove the
 
 This script requires root privileges since it installs `opensc` package and
 its dependencies. Feel free to review the script
-[here](https://raw.githubusercontent.com/jdjaxon/linux_cac/main/cac_setup.sh)
-if this makes you uncomfortable. For transparency, the
-the DoD certificates are downloaded from
-[here](https://militarycac.com/maccerts/AllCerts.zip), which are
-recommended by [militarycac](https://militarycac.com).
+[here](https://raw.githubusercontent.com/seakintruth/linux_cac/main/cac_setup.sh)
+if this makes you uncomfortable. For transparency, the DoD certificates are downloaded from the public
+Cyber Exchange PKCS#7 bundle
+([unclass-certificates_pkcs7_DoD.zip](https://dl.dod.cyber.mil/wp-content/uploads/pki-pke/zip/unclass-certificates_pkcs7_DoD.zip)),
+listed on
+[Tools & Configuration Files](https://www.cyber.mil/pki-pke/tools-configuration-files)
+as "PKI CA Certificate Bundles: PKCS#7 for DoD PKI Only". The script extracts
+PEM certificates with `openssl` and imports them into each browser NSS database.
+If the first HTTPS fetch fails because the host itself uses DoD PKI, wget
+retries that one download without certificate verification.
 
 > [!note]
-> - The automated installation requires `wget` and `unzip` to run and will
->  install both during the setup if they are not already installed. If you don't
+> - The automated installation requires `wget`, `unzip`, and `openssl` and will
+>  install them during the setup if they are not already installed. If you don't
 >  want either tool, remove it after the setup is complete using `sudo apt remove <command>`.
 > - The scripted installation has only been tested on the configurations listed in the
 >  [Supported Configurations](#supported-configurations)
@@ -84,12 +89,12 @@ recommended by [militarycac](https://militarycac.com).
 #### Methods
 - `wget`
 ```bash
-sudo bash -c "$(wget https://raw.githubusercontent.com/jdjaxon/linux_cac/main/cac_setup.sh -O -)"
+sudo bash -c "$(wget https://raw.githubusercontent.com/seakintruth/linux_cac/main/cac_setup.sh -O -)"
 ```
 
 - `curl`
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/jdjaxon/linux_cac/main/cac_setup.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/seakintruth/linux_cac/main/cac_setup.sh)"
 ```
 
 ## Known Issues
@@ -192,7 +197,9 @@ See the [LICENSE](./LICENSE) file for details.
 
 
 ## References
-- https://militarycac.com/linux.htm (this was my starting point)
+- https://www.cyber.mil/pki-pke/tools-configuration-files
+- https://dl.dod.cyber.mil/wp-content/uploads/pki-pke/zip/unclass-certificates_pkcs7_DoD.zip
+- https://militarycac.com/linux.htm (original starting point)
 - https://chromium.googlesource.com/chromium/src.git/+/refs/heads/main/docs/linux/cert_management.md
 - https://firefox-source-docs.mozilla.org/security/nss/legacy/tools/nss_tools_certutil/index.html
 - https://firefox-source-docs.mozilla.org/security/nss/legacy/tools/certutil/index.html
