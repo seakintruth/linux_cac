@@ -23,18 +23,13 @@ Requires wget, unzip, and openssl (installed by the script).
 
 ## Supported configurations
 
-Only rows we have actually run, or that the Proxmox lab in [`iac/`](iac/README.md) has smoked, belong here.
+Only combinations that passed a lab run. Dates, screenshots, USB notes, and planned rows live in [COMPATIBILITY.md](COMPATIBILITY.md).
 
-| Distribution | Version | Browsers | Status |
-| --- | --- | --- | --- |
-| Ubuntu | 26.04 | Snap Firefox, Chrome | Verified on hardware |
-| Ubuntu | 24.04 LTS | Snap Firefox, Chrome | Planned in `iac/matrix.yml` |
-| Ubuntu | 22.04 LTS | Snap Firefox, Chrome | Planned in `iac/matrix.yml` |
-| Debian | 12 / 13 | Firefox ESR | Planned in `iac/matrix.yml` |
-| Linux Mint | 22 | Firefox | Planned in `iac/matrix.yml` |
-| Fedora | — | — | Blocked: script is `apt` only |
+| Distribution | Version | Browsers |
+| --- | --- | --- |
+| Ubuntu | 26.04 | Snap Firefox, Chrome |
 
-GitHub Actions runs ShellCheck only. CAC, USB, and browser-picker tests run on Proxmox via Ansible. See [iac/README.md](iac/README.md).
+How the lab is run: [iac/README.md](iac/README.md).
 
 ## License
 MIT. See LICENSE.
