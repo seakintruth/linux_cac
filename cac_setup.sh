@@ -76,7 +76,7 @@ main ()
             print_warn "Failed to connect. Try upgrading with 'apt upgrade' and 'snap refresh' first."
             print_warn "Continuing without the pcscd snap connection."
         fi
-        print_info "Registering the pkcs11 module..."
+        print_info "Snap Firefox CAC uses the pcscd slot, not host opensc-pkcs11.so."
         register_snap_pkcs11
     else
         print_info "Registering CAC module with PKSC11..."
@@ -307,25 +307,15 @@ list_nss_databases ()
 
 register_snap_pkcs11 ()
 {
-    local lib snap_lib
-    lib="$(find /usr/lib /usr/lib64 -name 'opensc-pkcs11.so' 2>/dev/null | head -n 1 || true)"
-    if [ -z "$lib" ]
+    local listed
+    listed="$(sudo -H -u "$SUDO_USER" modutil -dbdir "sql:$ff_profile_dir" -list 2>/dev/null || true)"
+    if echo "$listed" | grep -qiE 'pkcs11|opensc|CAC Module|OpenSC'
     then
-        print_warn "opensc-pkcs11.so not found; skip PKCS#11 registration."
+        print_info "PKCS#11 is already listed in this profile. Leaving it alone."
         return 0
     fi
-    snap_lib="$ORIG_HOME/snap/firefox/common/opensc-pkcs11.so"
-    mkdir -p "$(dirname "$snap_lib")"
-    cp -f "$lib" "$snap_lib"
-    chown "$SUDO_USER":"$SUDO_USER" "$snap_lib" 2>/dev/null || true
-    if sudo -H -u "$SUDO_USER" modutil -dbdir "sql:$ff_profile_dir" \
-        -add "CAC Module" -libfile "$snap_lib" -force
-    then
-        print_info "Registered CAC Module from $snap_lib"
-        return 0
-    fi
-    print_warn "Snap Firefox could not load the PKCS#11 library ($snap_lib)."
-    print_warn "pcscd is connected; after reboot try an apt/deb Firefox, or add the module in about:preferences."
+    print_info "Not loading host opensc-pkcs11.so into snap Firefox (that call always fails)."
+    print_info "If CAC already works in this browser, you can ignore PKCS#11 registration."
 }
 
 extract_loose_certs ()
