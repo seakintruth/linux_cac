@@ -8,8 +8,6 @@ main ()
 {
     EXIT_SUCCESS=0
     E_NOTROOT=86
-    E_BROWSER=87
-    E_DATABASE=88
     E_CERTS=89
     DWNLD_DIR="$(mktemp -d)"
     trap 'rm -rf "$DWNLD_DIR"' EXIT
@@ -115,8 +113,7 @@ print_warn ()
 root_check ()
 {
     local ROOT_UID=0
-    if [ "${EUID:-$(id -u)}" -ne "$ROOT_UID" ]
-    then
+    if [ "${EUID:-$(id -u)}" -ne "$ROOT_UID" ]n    then
         print_err "This script must run as root to install packages and import trusted certificates."
         print_warn "Re-run with sudo."
         exit "$E_NOTROOT"
