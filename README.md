@@ -1,8 +1,4 @@
-<h1 align="center">Linux CAC</h1>
-
-<p align='center'>
-  <a href="https://github.com/sponsors/jdjaxon"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-30363D?style=flat&logo=GitHub-Sponsors&logoColor=#white" /></a>
-</p>
+# Linux CAC
 
 A project for consistently configuring Debian-based Linux distributions to work with Common Access Cards (CACs).
 
@@ -24,6 +20,21 @@ The script prompts first for extra public bundles (ECA, external partners, WCF, 
 Non-interactive: `sudo CAC_BUNDLES=all bash cac_setup.sh`
 
 Requires wget, unzip, and openssl (installed by the script).
+
+## Supported configurations
+
+Only rows we have actually run, or that the Proxmox lab in [`iac/`](iac/README.md) has smoked, belong here.
+
+| Distribution | Version | Browsers | Status |
+| --- | --- | --- | --- |
+| Ubuntu | 26.04 | Snap Firefox, Chrome | Verified on hardware |
+| Ubuntu | 24.04 LTS | Snap Firefox, Chrome | Planned in `iac/matrix.yml` |
+| Ubuntu | 22.04 LTS | Snap Firefox, Chrome | Planned in `iac/matrix.yml` |
+| Debian | 12 / 13 | Firefox ESR | Planned in `iac/matrix.yml` |
+| Linux Mint | 22 | Firefox | Planned in `iac/matrix.yml` |
+| Fedora | — | — | Blocked: script is `apt` only |
+
+GitHub Actions runs ShellCheck only. CAC, USB, and browser-picker tests run on Proxmox via Ansible. See [iac/README.md](iac/README.md).
 
 ## License
 MIT. See LICENSE.
