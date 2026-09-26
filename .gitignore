@@ -18,3 +18,10 @@ credentials.json
 secrets.yaml
 secrets.yml
 secrets.json
+
+# IaC local files
+iac/inventory/hosts.yml
+iac/group_vars/all.yml
+iac/group_vars/vault.yml
+iac/screenshots/
+*.retry
