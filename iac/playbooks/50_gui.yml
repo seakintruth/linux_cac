@@ -1,0 +1,71 @@
+---
+- name: Attach CAC reader and capture a browser screenshot
+  hosts: cac_guests
+  serial: 1
+  become: true
+  vars:
+    display: ":0"
+  tasks:
+    - name: Attach USB reader on the Proxmox node (serialized)
+      ansible.builtin.command: >
+        /usr/local/sbin/linux-cac-usb-attach
+        {{ vm_id }} {{ cac_usb_id }} {{ cac_usb_slot }}
+      delegate_to: "{{ cac_usb_node }}"
+      become: true
+
+    - name: Wait for pcscd to see a reader
+      ansible.builtin.command: pcsc_scan -n 1
+      register: pcsc
+      retries: 10
+      delay: 2
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if the guest never saw a reader
+      ansible.builtin.fail:
+        msg: "No smart card reader in the guest. Check USB id {{ cac_usb_id }} and that another VM does not hold it."
+      when: pcsc.rc != 0 or (pcsc.stdout | default('') | length == 0)
+
+    - name: Screenshot directory
+      ansible.builtin.file:
+        path: "{{ screenshot_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Launch browser against the CAC URL on DISPLAY :0
+      ansible.builtin.shell: |
+        export DISPLAY={{ display }}
+        case "{{ browser }}" in
+          firefox-snap|firefox) firefox --new-window "{{ cac_test_url }}" &
+            ;;
+          firefox-esr) firefox-esr --new-window "{{ cac_test_url }}" &
+            ;;
+          google-chrome|chromium) google-chrome --new-window "{{ cac_test_url }}" &
+            ;;
+          *) echo "unknown browser {{ browser }}"; exit 1 ;;
+        esac
+        sleep 8
+        scrot "{{ screenshot_dir }}/{{ inventory_hostname }}-$(date +%Y%m%d%H%M%S).png"
+      args:
+        executable: /bin/bash
+      become: true
+      become_user: "{{ guest_user }}"
+
+    - name: Optional PIN via xdotool (only if cac_pin is set)
+      ansible.builtin.shell: |
+        export DISPLAY={{ display }}
+        xdotool type --delay 80 '{{ cac_pin }}'
+        xdotool key Return
+      when: cac_pin | default('') | length > 0
+      no_log: true
+      become: true
+      become_user: "{{ guest_user }}"
+
+    - name: Fetch screenshots
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "./screenshots/"
+        flat: false
+      with_fileglob:
+        - "{{ screenshot_dir }}/*.png"
+      failed_when: false

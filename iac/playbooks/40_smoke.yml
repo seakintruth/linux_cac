@@ -1,0 +1,31 @@
+---
+- name: Smoke-test NSS import and pcscd without a card
+  hosts: cac_guests
+  become: true
+  tasks:
+    - name: pcscd is enabled
+      ansible.builtin.service:
+        name: pcscd
+        state: started
+        enabled: true
+
+    - name: List DoD roots in Firefox or pki NSS DBs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        found=0
+        while IFS= read -r db; do
+          dir=$(dirname "$db")
+          if certutil -L -d sql:"$dir" 2>/dev/null | grep -qi 'DoD Root'; then
+            echo "OK $dir"
+            found=1
+          fi
+        done < <(find /home /root -name cert9.db 2>/dev/null | grep -v Trash || true)
+        test "$found" -eq 1
+      args:
+        executable: /bin/bash
+      register: nss_check
+      changed_when: false
+
+    - name: Report DBs that contain DoD Root
+      ansible.builtin.debug:
+        var: nss_check.stdout_lines
