@@ -9,6 +9,7 @@ main ()
     E_NOTROOT=86                        # Non-root exit error
     E_BROWSER=87                        # Browser-related error (e.g. no browser installed)
     E_DATABASE=88                       # No database located
+    E_CERTS=89                          # Certificate download/extract error
     DWNLD_DIR="/tmp"                    # Location to place artifacts
 
     chrome_exists=false                 # Google Chrome is installed
@@ -17,12 +18,13 @@ main ()
     ff_profile_dir=""                   # Firefox profile directory
 
     ORIG_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
-    CERT_EXTENSION="cer"
-    # PKCS_FILENAME="pkcs11.txt"
     DB_FILENAME="cert9.db"
-    CERT_FILENAME="AllCerts"
-    BUNDLE_FILENAME="AllCerts.zip"
-    CERT_URL="https://militarycac.com/maccerts/$BUNDLE_FILENAME"
+    # Public Cyber Exchange PKCS#7 zip (version is inside the archive, not the URL).
+    # Catalog: https://www.cyber.mil/pki-pke/tools-configuration-files
+    CERT_FILENAME="DoD_PKCS7"
+    BUNDLE_FILENAME="unclass-certificates_pkcs7_DoD.zip"
+    CERT_URL="https://dl.dod.cyber.mil/wp-content/uploads/pki-pke/zip/${BUNDLE_FILENAME}"
+    PEM_DIR="$DWNLD_DIR/$CERT_FILENAME/pems"
 
     root_check
     browser_check
@@ -39,20 +41,11 @@ main ()
     # Install middleware and necessary utilities
     print_info "Installing middleware and essential utilities..."
     apt update
-    DEBIAN_FRONTEND=noninteractive apt install -y libpcsclite1 pcscd libccid libpcsc-perl pcsc-tools libnss3-tools unzip wget opensc
+    DEBIAN_FRONTEND=noninteractive apt install -y libpcsclite1 pcscd libccid libpcsc-perl pcsc-tools libnss3-tools unzip wget openssl opensc
     print_info "Done"
 
-    # Pull all necessary files
-    print_info "Downloading DoD certificates..."
-    wget -qP "$DWNLD_DIR" "$CERT_URL"
-    print_info "Done."
-
-    # Unzip cert bundle
-    if [ -e "$DWNLD_DIR/$BUNDLE_FILENAME" ]
-    then
-        mkdir -p "$DWNLD_DIR/$CERT_FILENAME"
-        unzip "$DWNLD_DIR/$BUNDLE_FILENAME" -d "$DWNLD_DIR/$CERT_FILENAME"
-    fi
+    download_dod_bundle
+    extract_dod_pems
 
     # Import certificates into cert9.db databases for browsers
     for db in "${databases[@]}"
@@ -84,12 +77,6 @@ main ()
         print_info "Registering CAC module with PKSC11..."
         pkcs11-register
         print_info "Done"
-
-        # NOTE: Keeping this temporarily to test `pkcs11-register`.
-        # if ! grep -Pzo 'library=/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so\nname=CAC Module\n' "$db_root/$PKCS_FILENAME" >/dev/null
-        # then
-        #     printf "library=/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so\nname=CAC Module\n" >> "$db_root/$PKCS_FILENAME"
-        # fi
     fi
 
 
@@ -140,6 +127,81 @@ root_check ()
 } # root_check
 
 
+download_dod_bundle ()
+{
+    print_info "Downloading DoD PKCS#7 bundle from Cyber Exchange..."
+    print_info "$CERT_URL"
+    if ! wget -qO "$DWNLD_DIR/$BUNDLE_FILENAME" "$CERT_URL"
+    then
+        print_info "TLS check failed (host may use DoD PKI). Retrying without certificate verification for this bootstrap download only."
+        if ! wget --no-check-certificate -qO "$DWNLD_DIR/$BUNDLE_FILENAME" "$CERT_URL"
+        then
+            print_err "Failed to download $CERT_URL"
+            exit "$E_CERTS"
+        fi
+    fi
+    if [ ! -s "$DWNLD_DIR/$BUNDLE_FILENAME" ]
+    then
+        print_err "Downloaded bundle is empty."
+        exit "$E_CERTS"
+    fi
+    print_info "Done."
+} # download_dod_bundle
+
+
+# Convert DISA PKCS#7 files into individual PEM certs for certutil.
+extract_dod_pems ()
+{
+    mkdir -p "$DWNLD_DIR/$CERT_FILENAME" "$PEM_DIR"
+    unzip -qo "$DWNLD_DIR/$BUNDLE_FILENAME" -d "$DWNLD_DIR/$CERT_FILENAME"
+
+    local p7 combined inform
+    combined="$DWNLD_DIR/$CERT_FILENAME/combined.pem"
+    : > "$combined"
+
+    mapfile -t p7s < <(find "$DWNLD_DIR/$CERT_FILENAME" -type f \( -iname '*.p7b' -o -iname '*.p7c' \) | sort)
+    if [ "${#p7s[@]}" -eq 0 ]
+    then
+        print_err "No PKCS#7 files found in the DoD zip."
+        exit "$E_CERTS"
+    fi
+
+    print_info "Extracting certificates from ${#p7s[@]} PKCS#7 file(s)..."
+    for p7 in "${p7s[@]}"
+    do
+        inform="PEM"
+        if ! grep -q "BEGIN" "$p7" 2>/dev/null
+        then
+            inform="DER"
+        fi
+        if ! openssl pkcs7 -in "$p7" -inform "$inform" -print_certs >> "$combined" 2>/dev/null
+        then
+            print_info "Skipping unreadable PKCS#7: $p7"
+        fi
+    done
+
+    if ! grep -q "BEGIN CERTIFICATE" "$combined"
+    then
+        print_err "openssl produced no certificates from the DoD bundle."
+        exit "$E_CERTS"
+    fi
+
+    # Split concatenated PEM into cert-000.pem, cert-001.pem, ...
+    awk -v out="$PEM_DIR" '
+        /-----BEGIN CERTIFICATE-----/ { n++; f=sprintf("%s/cert-%03d.pem", out, n) }
+        f { print > f }
+    ' "$combined"
+
+    local count
+    count="$(find "$PEM_DIR" -name 'cert-*.pem' | wc -l)"
+    print_info "Prepared $count PEM certificates."
+    if [ "$count" -eq 0 ]
+    then
+        exit "$E_CERTS"
+    fi
+} # extract_dod_pems
+
+
 # Run Firefox to ensure the profile directory has been created
 run_firefox ()
 {
@@ -154,10 +216,6 @@ run_firefox ()
 # Run Chrome to ensure .pki directory has been created
 run_chrome ()
 {
-    # NOTE: this is the original
-    # sudo -H -u "$SUDO_USER" bash -c 'google-chrome --headless --disable-gpu >/dev/null 2>&1 &'
-
-    # TODO: finish troubleshooting this
     print_info "Running Chrome to ensure it has completed post-install actions..."
     sudo -H -u "$SUDO_USER" google-chrome --headless --disable-gpu >/dev/null 2>&1 &
     sleep 3
@@ -256,10 +314,17 @@ import_certs ()
         print_info "Loading certificates into $db_root "
         echo
 
-        for cert in "$DWNLD_DIR/$CERT_FILENAME/"*."$CERT_EXTENSION"
+        local cert nick
+        for cert in "$PEM_DIR"/cert-*.pem
         do
-            echo "Importing $cert"
-            certutil -d sql:"$db_root" -A -t TC -n "$cert" -i "$cert"
+            [ -f "$cert" ] || continue
+            nick="$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 2>/dev/null | sed 's/^subject=//')"
+            if [ -z "$nick" ]
+            then
+                nick="$(basename "$cert")"
+            fi
+            echo "Importing $nick"
+            certutil -d sql:"$db_root" -A -t TC -n "$nick" -i "$cert" || print_info "Already present or skipped: $nick"
         done
     fi
 
