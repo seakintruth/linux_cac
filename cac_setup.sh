@@ -19,35 +19,39 @@ main ()
 
     ORIG_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
     DB_FILENAME="cert9.db"
-    # Public Cyber Exchange PKCS#7 zip (version is inside the archive, not the URL).
+    # Public Cyber Exchange PKCS#7 zips (version is inside the archive, not the URL).
     # Catalog: https://www.cyber.mil/pki-pke/tools-configuration-files
-    CERT_FILENAME="DoD_PKCS7"
-    BUNDLE_FILENAME="unclass-certificates_pkcs7_DoD.zip"
-    CERT_URL="https://dl.dod.cyber.mil/wp-content/uploads/pki-pke/zip/${BUNDLE_FILENAME}"
-    PEM_DIR="$DWNLD_DIR/$CERT_FILENAME/pems"
+    DL_BASE="https://dl.dod.cyber.mil/wp-content/uploads/pki-pke/zip"
+    WORK_DIR="$DWNLD_DIR/linux_cac_certs"
+    PEM_DIR="$WORK_DIR/pems"
+    UNIQUE_DIR="$WORK_DIR/unique"
 
     root_check
     browser_check
     mapfile -t databases < <(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox\|pki" | grep -v "Trash")
-    # Check if databases were found properly
     if [ "${#databases[@]}" -eq 0 ]
     then
         print_err "No valid databases located. Try running, then closing Firefox, then start this script again."
         echo -e "\tExiting..."
-
         exit "$E_DATABASE"
     fi
 
-    # Install middleware and necessary utilities
     print_info "Installing middleware and essential utilities..."
     apt update
     DEBIAN_FRONTEND=noninteractive apt install -y libpcsclite1 pcscd libccid libpcsc-perl pcsc-tools libnss3-tools unzip wget openssl opensc
     print_info "Done"
 
-    download_dod_bundle
-    extract_dod_pems
+    select_bundles
+    rm -rf "$WORK_DIR"
+    mkdir -p "$PEM_DIR" "$UNIQUE_DIR"
 
-    # Import certificates into cert9.db databases for browsers
+    local key
+    for key in "${SELECTED_BUNDLES[@]}"
+    do
+        fetch_and_extract_bundle "$key"
+    done
+    dedupe_pems
+
     for db in "${databases[@]}"
     do
         if [ -n "$db" ]
@@ -60,7 +64,6 @@ main ()
     systemctl enable pcscd.socket
     print_info "Done"
 
-    # Handle snapped firefox
     if [ "$snap_ff" == true ]
     then
         print_info "Connecting snapped Firefox to the pcscd socket..."
@@ -69,7 +72,6 @@ main ()
             print_err "Failed to connect. Try upgrading with 'apt upgrade' and 'snap refresh' first."
             exit "$E_BROWSER"
         fi
-
         print_info "Registering the pkcs11 module..."
         sudo -H -u "$SUDO_USER" modutil -dbdir "sql:$ff_profile_dir" \
             -add "CAC Module" -libfile /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so -force
@@ -79,13 +81,11 @@ main ()
         print_info "Done"
     fi
 
-
-    # Remove artifacts
     print_info "Removing artifacts..."
-    rm -rf "${DWNLD_DIR:?}"/{"$BUNDLE_FILENAME","$CERT_FILENAME"} 2>/dev/null
+    rm -rf "$WORK_DIR" 2>/dev/null
     if [ "$?" -ne "$EXIT_SUCCESS" ]
     then
-        print_err "Failed to remove artifacts. Artifacts were stored in ${DWNLD_DIR}."
+        print_err "Failed to remove artifacts. Artifacts were stored in ${WORK_DIR}."
     else
         print_info "Done. A reboot may be required."
     fi
@@ -93,80 +93,142 @@ main ()
     exit "$EXIT_SUCCESS"
 } # main
 
-
-# Prints message with red [ERROR] tag before the message
 print_err ()
 {
-    ERR_COLOR='\033[0;31m'  # Red for error messages
-    NO_COLOR='\033[0m'      # Revert terminal back to no color
+    ERR_COLOR='\033[0;31m'
+    NO_COLOR='\033[0m'
     echo -e "${ERR_COLOR}[ERROR]${NO_COLOR} $1"
-} # print_err
+}
 
-
-# Prints message with yellow [INFO] tag before the message
 print_info ()
 {
-    INFO_COLOR='\033[0;33m' # Yellow for notes
-    NO_COLOR='\033[0m'      # Revert terminal back to no color
+    INFO_COLOR='\033[0;33m'
+    NO_COLOR='\033[0m'
     echo -e "${INFO_COLOR}[INFO]${NO_COLOR} $1"
-} # print_info
+}
 
-
-# Check to ensure the script is executed as root
 root_check ()
 {
-    # Only users with $UID 0 have root privileges
     local ROOT_UID=0
-
-    # Ensure the script is ran as root
     if [ "${EUID:-$(id -u)}" -ne "$ROOT_UID" ]
     then
         print_err "Please run this script as root."
         exit "$E_NOTROOT"
     fi
-} # root_check
+}
 
-
-download_dod_bundle ()
+bundle_filename ()
 {
-    print_info "Downloading DoD PKCS#7 bundle from Cyber Exchange..."
-    print_info "$CERT_URL"
-    if ! wget -qO "$DWNLD_DIR/$BUNDLE_FILENAME" "$CERT_URL"
-    then
-        print_info "TLS check failed (host may use DoD PKI). Retrying without certificate verification for this bootstrap download only."
-        if ! wget --no-check-certificate -qO "$DWNLD_DIR/$BUNDLE_FILENAME" "$CERT_URL"
-        then
-            print_err "Failed to download $CERT_URL"
-            exit "$E_CERTS"
-        fi
-    fi
-    if [ ! -s "$DWNLD_DIR/$BUNDLE_FILENAME" ]
-    then
-        print_err "Downloaded bundle is empty."
-        exit "$E_CERTS"
-    fi
-    print_info "Done."
-} # download_dod_bundle
+    case "$1" in
+        dod) echo "unclass-certificates_pkcs7_DoD.zip" ;;
+        eca) echo "unclass-certificates_pkcs7_ECA.zip" ;;
+        wcf) echo "certificates_pkcs7_WCF.zip" ;;
+        external) echo "unclass-dod_approved_external_pkis_trust_chains.zip" ;;
+        *) echo "" ;;
+    esac
+}
 
-
-# Convert DISA PKCS#7 files into individual PEM certs for certutil.
-extract_dod_pems ()
+select_bundles ()
 {
-    mkdir -p "$DWNLD_DIR/$CERT_FILENAME" "$PEM_DIR"
-    unzip -qo "$DWNLD_DIR/$BUNDLE_FILENAME" -d "$DWNLD_DIR/$CERT_FILENAME"
+    SELECTED_BUNDLES=(dod)
+    local choice raw item
 
-    local p7 combined inform
-    combined="$DWNLD_DIR/$CERT_FILENAME/combined.pem"
+    if [ -n "${CAC_BUNDLES:-}" ]
+    then
+        raw="$(echo "$CAC_BUNDLES" | tr '[:upper:]' '[:lower:]' | tr ',' ' ')"
+        for item in $raw
+        do
+            case "$item" in
+                dod) ;;
+                eca|wcf|external) SELECTED_BUNDLES+=("$item") ;;
+                all) SELECTED_BUNDLES=(dod eca wcf external) ;;
+            esac
+        done
+        print_info "Bundles from CAC_BUNDLES: ${SELECTED_BUNDLES[*]}"
+        return
+    fi
+
+    if [ ! -r /dev/tty ]
+    then
+        print_info "No TTY; installing DoD PKI only. Set CAC_BUNDLES=all (or eca,external,wcf) to add more."
+        return
+    fi
+
+    echo
+    echo "DoD PKI CAs will be installed (required for CAC)."
+    echo "Also install other public Cyber Exchange CA bundles?"
+    echo "  [1] No \xe2\x80\x94 DoD only (default)"
+    echo "  [2] ECA (contractor External Certification Authority)"
+    echo "  [3] External partner trust chains (federal / approved PKIs)"
+    echo "  [4] WCF B&I"
+    echo "  [5] All public CA zips (DoD + ECA + External + WCF)"
+    echo "JITC test PKI is not offered."
+    echo
+    printf "Enter 1-5, or a comma list (e.g. 2,3): " > /dev/tty
+    IFS= read -r choice < /dev/tty || choice="1"
+    choice="${choice:-1}"
+
+    raw="$(echo "$choice" | tr ',' ' ')"
+    for item in $raw
+    do
+        case "$item" in
+            1|dod) ;;
+            2|eca) SELECTED_BUNDLES+=(eca) ;;
+            3|external) SELECTED_BUNDLES+=(external) ;;
+            4|wcf) SELECTED_BUNDLES+=(wcf) ;;
+            5|all) SELECTED_BUNDLES=(dod eca wcf external) ;;
+        esac
+    done
+    print_info "Bundles selected: ${SELECTED_BUNDLES[*]}"
+}
+
+download_zip ()
+{
+    local url="$1"
+    local dest="$2"
+    print_info "Downloading $url"
+    if wget -qO "$dest" "$url"
+    then
+        :
+    else
+        print_info "TLS check failed. Retrying this bootstrap download without certificate verification."
+        wget --no-check-certificate -qO "$dest" "$url" || return 1
+    fi
+    [ -s "$dest" ]
+}
+
+fetch_and_extract_bundle ()
+{
+    local key="$1"
+    local zip_name dest extract_dir combined inform p7
+    zip_name="$(bundle_filename "$key")"
+    if [ -z "$zip_name" ]
+    then
+        print_err "Unknown bundle key: $key"
+        return
+    fi
+    dest="$WORK_DIR/$zip_name"
+    extract_dir="$WORK_DIR/$key"
+    mkdir -p "$extract_dir"
+
+    if ! download_zip "$DL_BASE/$zip_name" "$dest"
+    then
+        print_err "Failed to download $key bundle; skipping."
+        return
+    fi
+
+    unzip -qo "$dest" -d "$extract_dir"
+    combined="$extract_dir/combined.pem"
     : > "$combined"
 
-    mapfile -t p7s < <(find "$DWNLD_DIR/$CERT_FILENAME" -type f \( -iname '*.p7b' -o -iname '*.p7c' \) | sort)
+    mapfile -t p7s < <(find "$extract_dir" -type f \( -iname '*.p7b' -o -iname '*.p7c' \) | sort)
     if [ "${#p7s[@]}" -eq 0 ]
     then
-        print_err "No PKCS#7 files found in the DoD zip."
-        exit "$E_CERTS"
+        print_err "No PKCS#7 files in $key zip; skipping."
+        return
     fi
 
-    print_info "Extracting certificates from ${#p7s[@]} PKCS#7 file(s)..."
+    print_info "Extracting ${#p7s[@]} PKCS#7 file(s) from $key..."
     for p7 in "${p7s[@]}"
     do
         inform="PEM"
@@ -174,35 +236,43 @@ extract_dod_pems ()
         then
             inform="DER"
         fi
-        if ! openssl pkcs7 -in "$p7" -inform "$inform" -print_certs >> "$combined" 2>/dev/null
-        then
-            print_info "Skipping unreadable PKCS#7: $p7"
-        fi
+        openssl pkcs7 -in "$p7" -inform "$inform" -print_certs >> "$combined" 2>/dev/null \
+            || print_info "Skipping unreadable PKCS#7: $p7"
     done
 
-    if ! grep -q "BEGIN CERTIFICATE" "$combined"
-    then
-        print_err "openssl produced no certificates from the DoD bundle."
-        exit "$E_CERTS"
-    fi
-
-    # Split concatenated PEM into cert-000.pem, cert-001.pem, ...
-    awk -v out="$PEM_DIR" '
-        /-----BEGIN CERTIFICATE-----/ { n++; f=sprintf("%s/cert-%03d.pem", out, n) }
+    awk -v out="$PEM_DIR" -v prefix="$key" '
+        /-----BEGIN CERTIFICATE-----/ { n++; f=sprintf("%s/%s-%03d.pem", out, prefix, n) }
         f { print > f }
     ' "$combined"
+}
 
-    local count
-    count="$(find "$PEM_DIR" -name 'cert-*.pem' | wc -l)"
-    print_info "Prepared $count PEM certificates."
-    if [ "$count" -eq 0 ]
+dedupe_pems ()
+{
+    local cert fp dest count_in count_out
+    count_in="$(find "$PEM_DIR" -name '*.pem' | wc -l)"
+    for cert in "$PEM_DIR"/*.pem
+    do
+        [ -f "$cert" ] || continue
+        fp="$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//;s/://g')"
+        if [ -z "$fp" ]
+        then
+            continue
+        fi
+        dest="$UNIQUE_DIR/${fp}.pem"
+        if [ ! -f "$dest" ]
+        then
+            cp "$cert" "$dest"
+        fi
+    done
+    count_out="$(find "$UNIQUE_DIR" -name '*.pem' | wc -l)"
+    print_info "Deduped $count_in extracted PEMs down to $count_out unique certificates."
+    if [ "$count_out" -eq 0 ]
     then
+        print_err "No unique certificates to import."
         exit "$E_CERTS"
     fi
-} # extract_dod_pems
+}
 
-
-# Run Firefox to ensure the profile directory has been created
 run_firefox ()
 {
     print_info "Starting Firefox silently to complete post-install actions..."
@@ -210,10 +280,8 @@ run_firefox ()
     sleep 3
     pkill -9 firefox
     sleep 1
-} # run_firefox
+}
 
-
-# Run Chrome to ensure .pki directory has been created
 run_chrome ()
 {
     print_info "Running Chrome to ensure it has completed post-install actions..."
@@ -222,44 +290,32 @@ run_chrome ()
     pkill -9 google-chrome
     sleep 1
     print_info "Done."
-} # run_chrome
+}
 
-
-# Discovery of browsers installed on the user's system
-# Sets appropriate flags to control the flow of the installation, depending on
-# what is needed for the individual user
 browser_check ()
 {
     print_info "Checking for Firefox and Chrome..."
     check_for_firefox
     check_for_chrome
-
-    # Browser check results
     if [ "$ff_exists" == false ] && [ "$chrome_exists" == false ]
     then
         print_err "No version of Mozilla Firefox OR Google Chrome has been detected."
         print_info "Please install either or both to proceed."
         exit "$E_BROWSER"
     fi
-} # browser_check
+}
 
-
-# Attempt to find an installed version of Firefox on the user's system
-# Determines whether the version is installed via snap or apt
 check_for_firefox ()
 {
     if command -v firefox >/dev/null
         then
-            # Run Firefox to ensure .mozilla directory has been created
             print_info "Running Firefox to generate profile directory..."
             run_firefox
             print_info "Done."
-
             ff_exists=true
             db_location="$(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep "firefox" | grep -v "Trash")"
             ff_profile_dir="$(dirname "$db_location")"
             print_info "Found Firefox with profile in ${ff_profile_dir}"
-
             if command -v firefox | grep snap >/dev/null
             then
                 snap_ff=true
@@ -274,26 +330,20 @@ check_for_firefox ()
         else
             print_info "Firefox not found."
         fi
-} # check_for_firefox
+}
 
-
-# Attempt to find a version of Google Chrome installed on the user's system
 check_for_chrome ()
 {
-    # Check to see if Chrome exists
     if command -v google-chrome >/dev/null
     then
         chrome_exists=true
         print_info "Found Google Chrome."
-        # Run Chrome to ensure .pki directory has been created
         run_chrome
     else
         print_info "Chrome not found."
     fi
-} # check_for_chrome
+}
 
-
-# Integrate all certificates into the databases for existing browsers
 import_certs ()
 {
     db=$1
@@ -302,20 +352,20 @@ import_certs ()
     then
         case "$db_root" in
             *"pki"*)
-                print_info "Importing certificates for Chrome..."
+                print_info "Importing unique certificates for Chrome..."
                 echo
                 ;;
             *"firefox"*)
-                print_info "Importing certificates for Firefox..."
+                print_info "Importing unique certificates for Firefox..."
                 echo
                 ;;
         esac
-
         print_info "Loading certificates into $db_root "
         echo
-
-        local cert nick
-        for cert in "$PEM_DIR"/cert-*.pem
+        local cert nick added skipped
+        added=0
+        skipped=0
+        for cert in "$UNIQUE_DIR"/*.pem
         do
             [ -f "$cert" ] || continue
             nick="$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 2>/dev/null | sed 's/^subject=//')"
@@ -323,14 +373,24 @@ import_certs ()
             then
                 nick="$(basename "$cert")"
             fi
-            echo "Importing $nick"
-            certutil -d sql:"$db_root" -A -t TC -n "$nick" -i "$cert" || print_info "Already present or skipped: $nick"
+            if certutil -d sql:"$db_root" -L -n "$nick" >/dev/null 2>&1
+            then
+                skipped=$((skipped + 1))
+                continue
+            fi
+            if certutil -d sql:"$db_root" -A -t TC -n "$nick" -i "$cert" 2>/dev/null
+            then
+                echo "Imported $nick"
+                added=$((added + 1))
+            else
+                print_info "Skipped $nick"
+                skipped=$((skipped + 1))
+            fi
         done
+        print_info "Imported $added, skipped $skipped (already present or failed)."
     fi
-
     print_info "Done."
     echo
-} # import_certs
-
+}
 
 main
