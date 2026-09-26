@@ -1,0 +1,4 @@
+---
+# ansible-vault encrypt group_vars/vault.yml
+# vault.yml is gitignored.
+cac_pin: "00000000"

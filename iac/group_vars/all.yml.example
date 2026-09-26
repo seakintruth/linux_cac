@@ -1,0 +1,28 @@
+---
+# Copy to all.yml and fill in. Do not commit all.yml.
+
+proxmox_api_host: pve.example.lan
+proxmox_api_user: ansible@pam!caclab
+proxmox_node: pve
+proxmox_storage: local-lvm
+proxmox_bridge: vmbr0
+proxmox_validate_certs: false
+
+# API token — prefer env:
+#   export PROXMOX_TOKEN_SECRET=...
+proxmox_token_id: caclab
+proxmox_token_secret: "{{ lookup('env', 'PROXMOX_TOKEN_SECRET') }}"
+
+# USB reader on the node named proxmox_usb_node (may differ from clone node).
+cac_usb_node: pve
+cac_usb_id: "04e6:5116"
+cac_usb_slot: usb0
+usb_lock: /var/lock/linux-cac-usb.lock
+
+guest_user: cacuser
+cac_bundles: dod
+cac_test_url: "https://login.dmdc.osd.mil"
+screenshot_dir: /tmp/linux-cac-screens
+
+# Leave empty unless you accept PIN automation. Store with ansible-vault.
+cac_pin: ""

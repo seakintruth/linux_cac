@@ -1,0 +1,40 @@
+---
+all:
+  children:
+    proxmox:
+      hosts:
+        pve:
+          ansible_host: 192.168.1.10
+          ansible_user: root
+    cac_guests:
+      hosts:
+        cac-u26-ff:
+          ansible_host: 192.168.20.26
+          ansible_user: cacuser
+          vm_id: 9206
+          template_vmid: 9006
+          browser: firefox-snap
+          os_family: debian
+        cac-u26-chrome:
+          ansible_host: 192.168.20.27
+          ansible_user: cacuser
+          vm_id: 9207
+          template_vmid: 9006
+          browser: google-chrome
+          os_family: debian
+        cac-u24-ff:
+          ansible_host: 192.168.20.24
+          ansible_user: cacuser
+          vm_id: 9204
+          template_vmid: 9004
+          browser: firefox-snap
+          os_family: debian
+        cac-deb12-ffesr:
+          ansible_host: 192.168.20.12
+          ansible_user: cacuser
+          vm_id: 9212
+          template_vmid: 9012
+          browser: firefox-esr
+          os_family: debian
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
