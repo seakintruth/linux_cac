@@ -281,28 +281,27 @@ dedupe_pems ()
 
 list_nss_databases ()
 {
-    local found
+    local found db
     mapfile -t found < <(find "$ORIG_HOME" -name "$DB_FILENAME" 2>/dev/null | grep -v Trash | sort)
-    local db keep
     for db in "${found[@]}"
     do
-        keep=false
         case "$db" in
-            */snap/code/*) continue ;;
-            */.mozilla/firefox/*) keep=true ;;
-            */snap/firefox/common/*) keep=true ;;
-            */snap/firefox/current/*) keep=true ;;
-            */.pki/nssdb/*) keep=true ;;
-            */snap/chromium/common/*) keep=true ;;
-            */snap/chromium/current/*) keep=true ;;
-            */snap/chromium/[0-9]*/*) continue ;;
             */snap/*/[0-9]*/*) continue ;;
+            *) printf '%s\n' "$db" ;;
         esac
-        if [ "$keep" = true ]
-        then
-            echo "$db"
-        fi
     done
+    if [ -d "$ORIG_HOME/snap" ]
+    then
+        find "$ORIG_HOME/snap" -name "$DB_FILENAME" 2>/dev/null | grep -E '/snap/[^/]+/[0-9]+/' | awk -F/ '
+            {
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "snap") { app = $(i + 1); rev = $(i + 2) + 0 }
+                }
+                if (rev >= best[app]) { best[app] = rev; path[app] = $0 }
+            }
+            END { for (a in path) print path[a] }
+        '
+    fi
 }
 
 register_snap_pkcs11 ()
@@ -458,13 +457,17 @@ import_certs ()
     if [ -n "$db_root" ]
     then
         case "$db_root" in
-            *"pki"*)
-                print_info "Importing unique certificates for Chrome..."
-                echo
-                ;;
             *"firefox"*)
                 print_info "Importing unique certificates for Firefox..."
-                echo
+                ;;
+            */snap/code/*)
+                print_info "Importing unique certificates for VS Code..."
+                ;;
+            *"chromium"*| *"pki"*)
+                print_info "Importing unique certificates for Chrome/Chromium..."
+                ;;
+            *)
+                print_info "Importing unique certificates into $db_root"
                 ;;
         esac
         print_info "Loading certificates into $db_root "
