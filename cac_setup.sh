@@ -113,7 +113,8 @@ print_warn ()
 root_check ()
 {
     local ROOT_UID=0
-    if [ "${EUID:-$(id -u)}" -ne "$ROOT_UID" ]n    then
+    if [ "${EUID:-$(id -u)}" -ne "$ROOT_UID" ]
+    then
         print_err "This script must run as root to install packages and import trusted certificates."
         print_warn "Re-run with sudo."
         exit "$E_NOTROOT"
